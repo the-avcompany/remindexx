@@ -33,18 +33,29 @@ export const Auth: React.FC<AuthProps> = ({ onLogin, onRegister, error, onClearE
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (isLogin) {
-            onLogin(email, password);
+            onLogin(email);
         } else {
-            onRegister(email, password, name);
+            onRegister(email, name);
         }
     };
 
     const handleGoogleLogin = async () => {
         setIsLoadingGoogle(true);
-        setTimeout(() => {
-            alert("Login com Google será configurado via Supabase Auth Providers.");
+        // Simulate network delay for OAuth
+        setTimeout(async () => {
+            const mockEmail = 'usuario.google@gmail.com';
+            const mockName = 'Usuário Google';
+
+            // Check if user exists locally to decide flow
+            const existingUser = await StorageService.login(mockEmail);
+
+            if (existingUser) {
+                onLogin(mockEmail);
+            } else {
+                onRegister(mockEmail, mockName);
+            }
             setIsLoadingGoogle(false);
-        }, 500);
+        }, 1200);
     };
 
     const toggleMode = () => {
