@@ -161,12 +161,13 @@ function App() {
     try {
       const newUser = await StorageService.register(email, password, name);
       if (newUser) {
-        setUser(newUser);
-        await refreshData();
-        setActiveTab('settings');
+        // Did not auto-login to prevent confusion.
+        setAuthError('');
+        alert("Conta criada com sucesso! Faça login para continuar.");
+        // We could switch state in Auth, but here we just reset
+        window.location.reload(); // Simple way to reset Auth state to Login mode or handle via prop
       } else {
-        // Supabase might require email confirmation
-        setAuthError('Verifique seu email para confirmar o cadastro (se ativado) ou tente fazer login.');
+        setAuthError('Verifique seu email para confirmar o cadastro.');
       }
     } catch (e: any) {
       console.error(e);
