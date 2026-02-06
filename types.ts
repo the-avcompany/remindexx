@@ -7,10 +7,10 @@ export enum Difficulty {
 }
 
 export enum StudyStage {
-  HIGH_SCHOOL = 'high_school', // Ensino Médio
-  COLLEGE = 'college', // Faculdade
-  CONTEST = 'contest', // Concursos
-  SELF_LEARNING = 'self_learning' // Autodidata
+  SCHOOL = 'school', // Escola (Fundamental/Médio)
+  CRAM_SCHOOL = 'cram_school', // Cursinho / Pré-vestibular
+  SELF_STUDY = 'self_study', // Estudando por conta própria
+  UNIVERSITY = 'university' // Faculdade / Universidade
 }
 
 export interface User {

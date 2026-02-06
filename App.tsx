@@ -9,25 +9,8 @@ import { RightPanel } from './components/RightPanel';
 import { Onboarding } from './components/Onboarding';
 import { SettingsView } from './components/SettingsView';
 import { StorageService, PlannerService } from './services';
-import { AppState, User, ReviewStatus, ReviewFeedback, ThemeSettings, UserSettings, NavigationParams, Difficulty } from './types';
+import { AppState, User, ReviewStatus, ReviewFeedback, ThemeSettings, UserSettings, NavigationParams } from './types';
 import { Card, Button } from './components/ui/Components';
-
-// Defaults for initial state to avoid null checks before load
-const DEFAULT_INTERVALS = {
-  [Difficulty.EASY]: [14, 60],
-  [Difficulty.MEDIUM]: [7, 21, 60],
-  [Difficulty.HARD]: [2, 7, 15, 30]
-};
-
-const DEFAULT_SETTINGS: UserSettings = {
-  dailyLimit: 5,
-  reviewIntervals: DEFAULT_INTERVALS,
-  theme: { name: 'green', primaryColor: '33 184 146', mode: 'light' },
-  setupCompleted: false,
-  paceMode: 'normal',
-  heavyDays: [],
-  checklist: { hasSubjects: false, hasContents: false, checkedCalendar: false, adjustedCapacity: false }
-};
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -36,7 +19,7 @@ function App() {
     subjects: [],
     contents: [],
     reviews: [],
-    settings: DEFAULT_SETTINGS
+    settings: StorageService.getSettings('temp') // Placeholder
   });
   const [activeTab, setActiveTab] = useState('dashboard');
   const [navParams, setNavParams] = useState<NavigationParams | undefined>(undefined);
@@ -87,149 +70,105 @@ function App() {
     }
   };
 
-  const refreshData = async () => {
-    if (!user) return;
-    try {
-      const [subjects, contents, reviews, settings] = await Promise.all([
-        StorageService.getSubjects(user.id),
-        StorageService.getContents(user.id),
-        StorageService.getReviews(user.id),
-        StorageService.getSettings(user.id)
-      ]);
-
-      setData({
-        subjects,
-        contents,
-        reviews,
-        settings
-      });
-      applyTheme(settings.theme);
-    } catch (error) {
-      console.error("Failed to refresh data", error);
-    }
-  };
-
-  // Initial Data Load (Check Session)
+  // Initial Data Load
   useEffect(() => {
     const checkUser = async () => {
-      setLoading(true);
-      try {
-        const currentUser = await StorageService.getCurrentUser();
-        if (currentUser) {
-          setUser(currentUser);
-          // Load initial data
-          const settings = await StorageService.getSettings(currentUser.id);
-          const subjects = await StorageService.getSubjects(currentUser.id);
-          const contents = await StorageService.getContents(currentUser.id);
-          const reviews = await StorageService.getReviews(currentUser.id);
-
-          setData({ subjects, contents, reviews, settings });
-          applyTheme(settings.theme);
-        }
-      } catch (err) {
-        console.error("Session check failed", err);
-      } finally {
-        setLoading(false);
-      }
+      // In a real app, check session token. Here just stop loading.
+      setLoading(false);
     };
     checkUser();
   }, []);
 
-  const handleLogin = async (email: string, password: string) => {
-    setAuthError('');
-    setLoading(true);
-    try {
-      const user = await StorageService.login(email, password);
+  const refreshData = () => {
+    if (!user) return;
+    const settings = StorageService.getSettings(user.id);
+    setData({
+      subjects: StorageService.getSubjects(user.id),
+      contents: StorageService.getContents(user.id),
+      reviews: StorageService.getReviews(user.id),
+      settings: settings
+    });
+    applyTheme(settings.theme);
+  };
 
-      if (user) {
-        setUser(user);
-        await refreshData();
-      } else {
-        setAuthError('Falha ao autenticar. Verifique suas credenciais.');
-      }
-    } catch (e: any) {
-      console.error(e);
-      setAuthError(e.message || 'Erro ao conectar. Verifique sua conexão.');
-    } finally {
-      setLoading(false);
+  const handleLogin = async (email: string) => {
+    setAuthError('');
+    const loggedUser = await StorageService.login(email);
+    if (loggedUser) {
+      setUser(loggedUser);
+      const settings = StorageService.getSettings(loggedUser.id);
+      applyTheme(settings.theme);
+
+      setData(prev => ({
+        ...prev,
+        subjects: StorageService.getSubjects(loggedUser.id),
+        contents: StorageService.getContents(loggedUser.id),
+        reviews: StorageService.getReviews(loggedUser.id),
+        settings: settings
+      }));
+    } else {
+      setAuthError('Conta não encontrada. Verifique o e-mail ou crie uma nova conta abaixo.');
     }
   };
 
-  const handleRegister = async (email: string, password: string, name: string) => {
-    setLoading(true);
+  const handleRegister = async (email: string, name: string) => {
     setAuthError('');
     try {
-      const newUser = await StorageService.register(email, password, name);
-      if (newUser) {
-        // Did not auto-login to prevent confusion.
-        setAuthError('');
-        alert("Conta criada com sucesso! Faça login para continuar.");
-        // We could switch state in Auth, but here we just reset
-        window.location.reload(); // Simple way to reset Auth state to Login mode or handle via prop
-      } else {
-        setAuthError('Verifique seu email para confirmar o cadastro.');
-      }
-    } catch (e: any) {
-      console.error(e);
-      setAuthError(e.message || 'Erro ao registrar.');
-    } finally {
-      setLoading(false);
+      const newUser = await StorageService.register(email, name);
+      setUser(newUser);
+      // New user default theme
+      const settings = StorageService.getSettings(newUser.id);
+      applyTheme(settings.theme);
+      refreshData();
+    } catch (e) {
+      setAuthError('Este e-mail já está cadastrado. Tente fazer login.');
     }
   };
 
-  const handleLogout = async () => {
-    const { supabase } = await import('./utils/supabaseClient');
-    await supabase.auth.signOut();
+  const handleLogout = () => {
     setUser(null);
     setAuthError('');
-    setData({ subjects: [], contents: [], reviews: [], settings: DEFAULT_SETTINGS });
+    setData({ subjects: [], contents: [], reviews: [], settings: data.settings });
     document.documentElement.classList.remove('dark');
   };
 
-  const handleReviewUpdate = async (id: string, status: ReviewStatus, feedback?: ReviewFeedback) => {
-    await StorageService.updateReviewStatus(id, status, feedback);
-    await refreshData();
+  const handleReviewUpdate = (id: string, status: ReviewStatus, feedback?: ReviewFeedback) => {
+    StorageService.updateReviewStatus(id, status, feedback);
+    refreshData();
   };
 
   const handleOnboardingComplete = async () => {
     if (user) {
-      const updatedUser = { ...user, onboardingCompleted: true };
-      await StorageService.updateUser(updatedUser);
-      setUser(updatedUser);
-      await refreshData();
+      const updatedUser = await StorageService.login(user.email);
+      if (updatedUser) {
+        const finalUser = { ...updatedUser, onboardingCompleted: true };
+        if (!updatedUser.onboardingCompleted) {
+          StorageService.updateUser(finalUser);
+        }
+        setUser(finalUser);
+        refreshData();
+      }
     }
   };
 
-  const handleUpdateUser = async (updatedUser: User) => {
-    await StorageService.updateUser(updatedUser);
+  const handleUpdateUser = (updatedUser: User) => {
+    StorageService.updateUser(updatedUser);
     setUser(updatedUser);
   };
 
-  const handleUpdateSettings = async (updatedSettings: UserSettings) => {
+  const handleUpdateSettings = (updatedSettings: UserSettings) => {
     if (!user) return;
-    await StorageService.saveSettings(user.id, updatedSettings);
+    StorageService.saveSettings(user.id, updatedSettings);
     applyTheme(updatedSettings.theme);
-    await PlannerService.rebalanceSchedule(user.id);
+    PlannerService.rebalanceSchedule(user.id);
     setData(prev => ({ ...prev, settings: updatedSettings }));
-    await refreshData();
+    refreshData();
   };
 
-  const handleResetData = async () => {
+  const handleResetData = () => {
     if (confirm("ATENÇÃO: Isso apagará permanentemente todo o seu histórico e progresso. Continuar?")) {
-      // In Supabase, we might not want to delete the user, maybe just data.
-      // Or just clear local state? 
-      // For now, let's keep it simple: clear local and reload (simulating logout/wipe)
-      // OR actually delete user data from DB.
-      // Implementing full wipe via usage of delete tools if they existed.
-      // Let's just signOut for safety or warn user implementation is pending.
-      // If we really want to delete:
-      const { supabase } = await import('./utils/supabaseClient');
-      if (user) {
-        // You'd need backend logic or RLS to allow deleting all data.
-        // Let's just sign out.
-        await supabase.auth.signOut();
-        window.location.reload();
-      }
+      localStorage.clear();
+      window.location.reload();
     }
   };
 
@@ -257,7 +196,6 @@ function App() {
     return (
       <Onboarding
         user={user}
-        settings={data.settings}
         onComplete={handleOnboardingComplete}
         onUpdateTheme={applyTheme}
       />
@@ -273,7 +211,6 @@ function App() {
             contents={data.contents}
             subjects={data.subjects}
             user={user}
-            settings={data.settings}
             onReviewUpdate={handleReviewUpdate}
             onDataChange={refreshData}
             onNavigate={handleNavigation}
@@ -283,7 +220,6 @@ function App() {
       case 'calendar':
         return (
           <CalendarView
-            user={user}
             reviews={data.reviews}
             contents={data.contents}
             subjects={data.subjects}
@@ -297,7 +233,6 @@ function App() {
             userId={user.id}
             subjects={data.subjects}
             contents={data.contents}
-            reviews={data.reviews}
             onDataChange={refreshData}
           />
         );
@@ -312,19 +247,7 @@ function App() {
           />
         );
       default:
-        return (
-          <Dashboard
-            reviews={data.reviews}
-            contents={data.contents}
-            subjects={data.subjects}
-            user={user}
-            settings={data.settings}
-            onReviewUpdate={handleReviewUpdate}
-            onDataChange={refreshData}
-            onNavigate={handleNavigation}
-            navParams={navParams}
-          />
-        );
+        return <Dashboard reviews={data.reviews} contents={data.contents} subjects={data.subjects} onReviewUpdate={handleReviewUpdate} user={user} onDataChange={refreshData} onNavigate={handleNavigation} navParams={navParams} />;
     }
   };
 
@@ -339,7 +262,6 @@ function App() {
           user={user}
           reviews={data.reviews}
           contents={data.contents}
-          settings={data.settings}
           onDataChange={refreshData}
           onNavigate={handleNavigation}
         />
