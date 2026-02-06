@@ -1,0 +1,137 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <title>Remindex</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            colors: {
+              primary: {
+                DEFAULT: 'rgb(var(--color-primary) / <alpha-value>)',
+                strong: 'rgb(var(--color-primary-strong) / <alpha-value>)',
+                muted: 'rgb(var(--color-primary-muted) / <alpha-value>)',
+                soft: 'rgb(var(--color-primary-soft) / <alpha-value>)',
+              },
+              slate: {
+                50: '#F9FAFB', 
+                100: '#F3F4F6',
+                200: '#E5E7EB',
+                300: '#D1D5DB',
+                400: '#9CA3AF',
+                500: '#64748B',
+                600: '#475569',
+                700: '#334155',
+                800: '#1E293B',
+                900: '#0F172A',
+              }
+            },
+            fontFamily: {
+              sans: ['Urbanist', 'sans-serif'],
+            },
+            fontSize: {
+              // Fluid Typography
+              'xs': 'clamp(0.75rem, 1.6vw, 0.8125rem)', 
+              'sm': 'clamp(0.875rem, 1.8vw, 0.9375rem)',
+              'base': 'clamp(0.95rem, 2vw, 1rem)',
+              'lg': 'clamp(1.1rem, 2.2vw, 1.125rem)',
+              'xl': 'clamp(1.25rem, 2.5vw, 1.35rem)',
+              '2xl': 'clamp(1.4rem, 2.8vw, 1.5rem)',
+              '3xl': 'clamp(1.75rem, 3.5vw, 2.25rem)',
+              '4xl': 'clamp(2.25rem, 4.5vw, 3rem)',
+            },
+            spacing: {
+              'safe-top': 'env(safe-area-inset-top)',
+              'safe-bottom': 'env(safe-area-inset-bottom)',
+              'safe-left': 'env(safe-area-inset-left)',
+              'safe-right': 'env(safe-area-inset-right)',
+            },
+            screens: {
+              'xs': '375px',
+              'sm': '640px',
+              'md': '768px',
+              'lg': '1024px',
+              'xl': '1280px',
+              '2xl': '1536px',
+            }
+          },
+        },
+      }
+    </script>
+    <style>
+      @import url('https://fonts.googleapis.com/css2?family=Urbanist:wght@400;500;600;700&display=swap');
+      
+      :root {
+        --color-primary: 33 184 146; 
+        --color-primary-strong: 25 150 118;
+        --color-primary-muted: 110 200 180;
+        --color-primary-soft: 233 248 244;
+      }
+
+      * {
+        box-sizing: border-box;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      html, body {
+        height: 100%;
+        overflow-x: hidden; /* Prevent horizontal scroll */
+      }
+
+      body {
+        font-family: 'Urbanist', sans-serif;
+        background-color: #F9FAFB;
+        color: #475569;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+        font-size: 16px;
+      }
+
+      h1, h2, h3, h4, h5, h6 {
+        color: #0F172A;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        line-height: 1.2;
+      }
+
+      /* Scrollbar */
+      ::-webkit-scrollbar { width: 4px; height: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 99px; }
+      ::-webkit-scrollbar-thumb:hover { background: #CBD5E1; }
+      
+      /* Hide scrollbar for cleaner mobile UI but keep functionality */
+      .no-scrollbar::-webkit-scrollbar {
+          display: none;
+      }
+      .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+      }
+
+      /* Safe Area Utilities */
+      .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+      .pt-safe { padding-top: env(safe-area-inset-top); }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.4",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
+    "react/": "https://esm.sh/react@^19.2.4/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
