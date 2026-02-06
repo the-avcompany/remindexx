@@ -28,13 +28,13 @@ function App() {
   // Apply Theme Function - Monochromatic System
   const applyTheme = (theme: ThemeSettings) => {
     const root = document.documentElement;
-    
+
     // 1. Set Base Primary
     root.style.setProperty('--color-primary', theme.primaryColor);
-    
+
     try {
       const [r, g, b] = theme.primaryColor.split(' ').map(Number);
-      
+
       // 2. Strong: Darker, more saturated (for main buttons)
       // Darken by 15%
       const rS = Math.max(0, r - 40);
@@ -73,8 +73,8 @@ function App() {
   // Initial Data Load
   useEffect(() => {
     const checkUser = async () => {
-        // In a real app, check session token. Here just stop loading.
-        setLoading(false);
+      // In a real app, check session token. Here just stop loading.
+      setLoading(false);
     };
     checkUser();
   }, []);
@@ -98,7 +98,7 @@ function App() {
       setUser(loggedUser);
       const settings = StorageService.getSettings(loggedUser.id);
       applyTheme(settings.theme);
-      
+
       setData(prev => ({
         ...prev,
         subjects: StorageService.getSubjects(loggedUser.id),
@@ -120,6 +120,7 @@ function App() {
       const settings = StorageService.getSettings(newUser.id);
       applyTheme(settings.theme);
       refreshData();
+      setActiveTab('settings'); // DIRECT TO SETTINGS
     } catch (e) {
       setAuthError('Este e-mail já está cadastrado. Tente fazer login.');
     }
@@ -143,7 +144,7 @@ function App() {
       if (updatedUser) {
         const finalUser = { ...updatedUser, onboardingCompleted: true };
         if (!updatedUser.onboardingCompleted) {
-           StorageService.updateUser(finalUser);
+          StorageService.updateUser(finalUser);
         }
         setUser(finalUser);
         refreshData();
@@ -166,9 +167,9 @@ function App() {
   };
 
   const handleResetData = () => {
-    if(confirm("ATENÇÃO: Isso apagará permanentemente todo o seu histórico e progresso. Continuar?")) {
-        localStorage.clear();
-        window.location.reload();
+    if (confirm("ATENÇÃO: Isso apagará permanentemente todo o seu histórico e progresso. Continuar?")) {
+      localStorage.clear();
+      window.location.reload();
     }
   };
 
@@ -183,9 +184,9 @@ function App() {
 
   if (!user) {
     return (
-      <Auth 
-        onLogin={handleLogin} 
-        onRegister={handleRegister} 
+      <Auth
+        onLogin={handleLogin}
+        onRegister={handleRegister}
         error={authError}
         onClearError={() => setAuthError('')}
       />
@@ -194,8 +195,8 @@ function App() {
 
   if (!user.onboardingCompleted) {
     return (
-      <Onboarding 
-        user={user} 
+      <Onboarding
+        user={user}
         onComplete={handleOnboardingComplete}
         onUpdateTheme={applyTheme}
       />
@@ -206,9 +207,9 @@ function App() {
     switch (activeTab) {
       case 'dashboard':
         return (
-          <Dashboard 
-            reviews={data.reviews} 
-            contents={data.contents} 
+          <Dashboard
+            reviews={data.reviews}
+            contents={data.contents}
             subjects={data.subjects}
             user={user}
             onReviewUpdate={handleReviewUpdate}
@@ -219,7 +220,7 @@ function App() {
         );
       case 'calendar':
         return (
-          <CalendarView 
+          <CalendarView
             reviews={data.reviews}
             contents={data.contents}
             subjects={data.subjects}
@@ -229,7 +230,7 @@ function App() {
         );
       case 'contents':
         return (
-          <ContentManager 
+          <ContentManager
             userId={user.id}
             subjects={data.subjects}
             contents={data.contents}
@@ -238,7 +239,7 @@ function App() {
         );
       case 'settings':
         return (
-          <SettingsView 
+          <SettingsView
             user={user}
             settings={data.settings}
             onUpdateUser={handleUpdateUser}
@@ -252,15 +253,15 @@ function App() {
   };
 
   return (
-    <Layout 
-      activeTab={activeTab} 
-      onTabChange={handleNavigation} 
+    <Layout
+      activeTab={activeTab}
+      onTabChange={handleNavigation}
       user={user}
       onLogout={handleLogout}
       rightPanel={
-        <RightPanel 
-          user={user} 
-          reviews={data.reviews} 
+        <RightPanel
+          user={user}
+          reviews={data.reviews}
           contents={data.contents}
           onDataChange={refreshData}
           onNavigate={handleNavigation}

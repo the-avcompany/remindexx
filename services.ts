@@ -68,24 +68,24 @@ const DEFAULT_SETTINGS: UserSettings = {
 export const SubjectSuggestions = {
   getSuggestions: (goal: string = '', stage: StudyStage = StudyStage.UNIVERSITY): string[] => {
     const text = goal.toLowerCase();
-    
+
     // 1. NON-UNIVERSITY STAGE (School, Cram School, Self-study)
     // Suggest generic High School / Entrance Exam subjects
     if (stage !== StudyStage.UNIVERSITY) {
-        const baseSubjects = ['Matemática', 'Português', 'Redação', 'História', 'Geografia', 'Física', 'Química', 'Biologia', 'Filosofia', 'Inglês'];
-        
-        // We can create slight bias based on goal, but keep it high-school level
-        if (text.includes('med') || text.includes('saúde')) {
-            return ['Biologia', 'Química', 'Física', 'Redação', 'Matemática', 'Português'];
-        }
-        if (text.includes('eng') || text.includes('exata')) {
-            return ['Matemática', 'Física', 'Química', 'Redação', 'Português'];
-        }
-        if (text.includes('dir') || text.includes('human')) {
-            return ['História', 'Geografia', 'Português', 'Redação', 'Filosofia', 'Sociologia'];
-        }
-        
-        return baseSubjects;
+      const baseSubjects = ['Matemática', 'Português', 'Redação', 'História', 'Geografia', 'Física', 'Química', 'Biologia', 'Filosofia', 'Inglês'];
+
+      // We can create slight bias based on goal, but keep it high-school level
+      if (text.includes('med') || text.includes('saúde')) {
+        return ['Biologia', 'Química', 'Física', 'Redação', 'Matemática', 'Português'];
+      }
+      if (text.includes('eng') || text.includes('exata')) {
+        return ['Matemática', 'Física', 'Química', 'Redação', 'Português'];
+      }
+      if (text.includes('dir') || text.includes('human')) {
+        return ['História', 'Geografia', 'Português', 'Redação', 'Filosofia', 'Sociologia'];
+      }
+
+      return baseSubjects;
     }
 
     // 2. UNIVERSITY STAGE
@@ -100,12 +100,12 @@ export const SubjectSuggestions = {
       return ['Dir. Constitucional', 'Dir. Administrativo', 'Dir. Penal', 'Dir. Civil', 'Processo Civil'];
     }
     if (text.includes('adm') || text.includes('gest') || text.includes('neg')) {
-        return ['Teoria Geral da Adm', 'Contabilidade', 'Marketing', 'Finanças', 'Gestão de Pessoas'];
+      return ['Teoria Geral da Adm', 'Contabilidade', 'Marketing', 'Finanças', 'Gestão de Pessoas'];
     }
     if (text.includes('ing') || text.includes('idioma')) {
       return ['Gramática Avançada', 'Vocabulário', 'Listening', 'Reading', 'Speaking'];
     }
-    
+
     // Default University fallback
     return ['Matéria Teórica', 'Matéria Prática', 'Projeto', 'TCC', 'Estágio'];
   }
@@ -221,7 +221,7 @@ interface DB {
   subjects: Subject[];
   contents: StudyContent[];
   reviews: Review[];
-  settings: Record<string, UserSettings>; 
+  settings: Record<string, UserSettings>;
   exceptions: DayException[];
   retentionEvents: RetentionEvent[];
 }
@@ -247,17 +247,17 @@ export const StorageService = {
     const user = db.users.find(u => u.email === email);
     return user || null;
   },
-  
+
   register: async (email: string, name: string): Promise<User> => {
     const db = getDB();
     if (db.users.find(u => u.email === email)) {
       throw new Error('User already exists');
     }
-    const newUser: User = { 
-      id: generateId(), 
-      email, 
-      name, 
-      onboardingCompleted: false,
+    const newUser: User = {
+      id: generateId(),
+      email,
+      name,
+      onboardingCompleted: true, // SKIPPING WIZARD: Account created ready-to-use
       stage: StudyStage.UNIVERSITY
     };
     db.users.push(newUser);
@@ -280,8 +280,8 @@ export const StorageService = {
     const db = getDB();
     const saved = db.settings[userId];
     if (!saved) return { ...DEFAULT_SETTINGS };
-    return { 
-      ...DEFAULT_SETTINGS, 
+    return {
+      ...DEFAULT_SETTINGS,
       ...saved,
       checklist: { ...DEFAULT_CHECKLIST, ...(saved.checklist || {}) }
     };
@@ -342,7 +342,7 @@ export const StorageService = {
     const db = getDB();
     const userSettings = db.settings[userId] || DEFAULT_SETTINGS;
     const contentId = generateId();
-    
+
     const newContent: StudyContent = {
       id: contentId,
       userId,
@@ -359,7 +359,7 @@ export const StorageService = {
     const effort = effortMap[difficulty];
 
     const schedule = SchedulerService.calculateSchedule(difficulty, userSettings.reviewIntervals);
-    
+
     const newReviews: Review[] = schedule.map(days => {
       const targetDate = addDays(dateStudied, days);
       return {
@@ -384,7 +384,7 @@ export const StorageService = {
   updateContent: (userId: string, contentId: string, updates: Partial<StudyContent>) => {
     const db = getDB();
     const index = db.contents.findIndex(c => c.id === contentId);
-    
+
     if (index !== -1) return;
 
     const oldContent = db.contents[index];
@@ -395,45 +395,45 @@ export const StorageService = {
     const dateChanged = oldContent.dateStudied !== newContent.dateStudied;
 
     if (difficultyChanged || dateChanged) {
-        db.reviews = db.reviews.filter(r => !(r.contentId === contentId && r.status === ReviewStatus.PENDING));
-        const userSettings = db.settings[userId] || DEFAULT_SETTINGS;
-        const schedule = SchedulerService.calculateSchedule(newContent.difficulty, userSettings.reviewIntervals);
-        const effortMap = { [Difficulty.EASY]: 1.0, [Difficulty.MEDIUM]: 1.3, [Difficulty.HARD]: 1.7 };
-        const effort = effortMap[newContent.difficulty];
-        const today = formatDate(new Date());
+      db.reviews = db.reviews.filter(r => !(r.contentId === contentId && r.status === ReviewStatus.PENDING));
+      const userSettings = db.settings[userId] || DEFAULT_SETTINGS;
+      const schedule = SchedulerService.calculateSchedule(newContent.difficulty, userSettings.reviewIntervals);
+      const effortMap = { [Difficulty.EASY]: 1.0, [Difficulty.MEDIUM]: 1.3, [Difficulty.HARD]: 1.7 };
+      const effort = effortMap[newContent.difficulty];
+      const today = formatDate(new Date());
 
-        const newReviews: Review[] = schedule.map(days => {
-            const targetDate = addDays(newContent.dateStudied, days);
-            return {
-                id: generateId(),
-                userId,
-                contentId,
-                date: targetDate,
-                status: ReviewStatus.PENDING,
-                windowStart: addDays(targetDate, -1),
-                windowEnd: addDays(targetDate, 2),
-                effort: effort,
-                originalDate: targetDate
-            };
-        }).filter(r => {
-            return r.date >= today;
+      const newReviews: Review[] = schedule.map(days => {
+        const targetDate = addDays(newContent.dateStudied, days);
+        return {
+          id: generateId(),
+          userId,
+          contentId,
+          date: targetDate,
+          status: ReviewStatus.PENDING,
+          windowStart: addDays(targetDate, -1),
+          windowEnd: addDays(targetDate, 2),
+          effort: effort,
+          originalDate: targetDate
+        };
+      }).filter(r => {
+        return r.date >= today;
+      });
+
+      if (newReviews.length === 0) {
+        const fallbackDate = addDays(today, 1);
+        newReviews.push({
+          id: generateId(),
+          userId,
+          contentId,
+          date: fallbackDate,
+          status: ReviewStatus.PENDING,
+          windowStart: today,
+          windowEnd: addDays(fallbackDate, 2),
+          effort: effort,
+          originalDate: fallbackDate
         });
-        
-        if (newReviews.length === 0) {
-             const fallbackDate = addDays(today, 1);
-             newReviews.push({
-                id: generateId(),
-                userId,
-                contentId,
-                date: fallbackDate,
-                status: ReviewStatus.PENDING,
-                windowStart: today,
-                windowEnd: addDays(fallbackDate, 2),
-                effort: effort,
-                originalDate: fallbackDate
-             });
-        }
-        db.reviews.push(...newReviews);
+      }
+      db.reviews.push(...newReviews);
     }
     saveDB(db);
     PlannerService.rebalanceSchedule(userId);
@@ -460,14 +460,14 @@ export const StorageService = {
     const db = getDB();
     const today = formatDate(new Date());
     const tomorrow = addDays(today, 1);
-    
+
     // 1. Mark the review as done (if a specific review ID was passed)
     if (reviewId) {
-        const rIdx = db.reviews.findIndex(r => r.id === reviewId);
-        if (rIdx !== -1) {
-            db.reviews[rIdx].status = ReviewStatus.COMPLETED;
-            db.reviews[rIdx].feedback = type === 'forgot' ? ReviewFeedback.FORGOT : ReviewFeedback.REMEMBERED;
-        }
+      const rIdx = db.reviews.findIndex(r => r.id === reviewId);
+      if (rIdx !== -1) {
+        db.reviews[rIdx].status = ReviewStatus.COMPLETED;
+        db.reviews[rIdx].feedback = type === 'forgot' ? ReviewFeedback.FORGOT : ReviewFeedback.REMEMBERED;
+      }
     }
 
     // 2. Log Retention Event
@@ -487,7 +487,7 @@ export const StorageService = {
       // Insert a new review for TOMORROW (or next available).
       // Logic: If there is no review scheduled for tomorrow, create one.
       const hasImmediate = pendingReviews.some(r => r.date <= tomorrow);
-      
+
       if (!hasImmediate) {
         const effort = 1.7; // Harder because forgot
         const newReview: Review = {
@@ -513,7 +513,7 @@ export const StorageService = {
         const diff = getDaysDiff(today, r.date);
         const addedBuffer = Math.max(2, Math.ceil(diff * 0.2));
         const newDate = addDays(r.date, addedBuffer);
-        
+
         r.date = newDate;
         r.originalDate = newDate;
         r.windowStart = addDays(newDate, -1);
@@ -522,7 +522,7 @@ export const StorageService = {
     }
 
     saveDB(db);
-    
+
     // 3. Rebalance everything to fit capacity
     PlannerService.rebalanceSchedule(userId);
   },
@@ -537,7 +537,7 @@ export const StorageService = {
     db.exceptions.push(exception);
     saveDB(db);
   },
-  
+
   saveReviewsBulk: (reviews: Review[]) => {
     const db = getDB();
     reviews.forEach(updated => {
@@ -564,7 +564,7 @@ export const SuggestionService = {
 
     const pendingToday = reviews.filter(r => r.status === ReviewStatus.PENDING && r.date <= today).length;
     const tomorrowCount = reviews.filter(r => r.status === ReviewStatus.PENDING && r.date === tomorrow).length;
-    
+
     if (subjects.length === 0) {
       return {
         key: 'add_subject',
@@ -605,27 +605,27 @@ export const SuggestionService = {
     }
 
     if (tomorrowCount > 7) {
-        return {
-            key: 'plan_tomorrow',
-            headline: 'Amanhã está pesado',
-            subtext: `Você tem ${tomorrowCount} revisões agendadas.`,
-            cta: 'Ajustar carga',
-            icon: FastForward,
-            route: 'calendar',
-            navParams: { action: 'open_day', date: tomorrow },
-            priority: 4
-        };
+      return {
+        key: 'plan_tomorrow',
+        headline: 'Amanhã está pesado',
+        subtext: `Você tem ${tomorrowCount} revisões agendadas.`,
+        cta: 'Ajustar carga',
+        icon: FastForward,
+        route: 'calendar',
+        navParams: { action: 'open_day', date: tomorrow },
+        priority: 4
+      };
     }
 
     return {
-        key: 'all_good',
-        headline: 'Tudo em dia ✅',
-        subtext: 'Quer adiantar algo ou reforçar um tema?',
-        cta: 'Adicionar conteúdo',
-        icon: CheckCircle2,
-        route: 'dashboard',
-        navParams: { action: 'focus_add_content' },
-        priority: 99
+      key: 'all_good',
+      headline: 'Tudo em dia ✅',
+      subtext: 'Quer adiantar algo ou reforçar um tema?',
+      cta: 'Adicionar conteúdo',
+      icon: CheckCircle2,
+      route: 'dashboard',
+      navParams: { action: 'focus_add_content' },
+      priority: 99
     };
   }
 };
@@ -634,7 +634,7 @@ export const PlannerService = {
   getDailyCapacity: (dateStr: string, settings: UserSettings, exceptions: DayException[]): number => {
     const base = settings.dailyLimit;
     const dayOfWeek = getDayOfWeek(dateStr);
-    
+
     let multiplier = 1.0;
     if (settings.heavyDays.includes(dayOfWeek)) {
       multiplier *= 0.6;
@@ -655,17 +655,17 @@ export const PlannerService = {
     const db = getDB();
     const settings = StorageService.getSettings(userId);
     const exceptions = StorageService.getExceptions(userId);
-    
+
     const pendingReviews = db.reviews.filter(r => r.userId === userId && r.status === ReviewStatus.PENDING);
-    
+
     if (pendingReviews.length === 0) return;
 
     const today = formatDate(new Date());
-    
+
     const scoredReviews = pendingReviews.map(r => {
       const overdueDays = Math.max(0, getDaysDiff(r.windowEnd, today));
       const daysUntilDue = getDaysDiff(today, r.date);
-      
+
       let score = 0;
       score += overdueDays * 100;
       score += (r.effort * 10);
@@ -686,14 +686,14 @@ export const PlannerService = {
     for (const r of queue) {
       let bestDate = r.date;
       let placed = false;
-      
+
       const effectiveWindowStart = r.windowStart < today ? today : r.windowStart;
-      const effectiveWindowEnd = r.windowEnd < today ? today : r.windowEnd; 
+      const effectiveWindowEnd = r.windowEnd < today ? today : r.windowEnd;
 
       for (let i = 0; i <= getDaysDiff(effectiveWindowStart, effectiveWindowEnd); i++) {
         const candidateDate = addDays(effectiveWindowStart, i);
         const capacity = PlannerService.getDailyCapacity(candidateDate, settings, exceptions);
-        const capacityPoints = capacity * 1.3; 
+        const capacityPoints = capacity * 1.3;
 
         if (getLoad(candidateDate) + r.effort <= capacityPoints) {
           bestDate = candidateDate;
@@ -708,18 +708,18 @@ export const PlannerService = {
         let selectedDate = r.date < today ? today : r.date;
 
         const scanStart = effectiveWindowStart;
-        const scanEnd = addDays(effectiveWindowEnd, 2); 
+        const scanEnd = addDays(effectiveWindowEnd, 2);
 
         for (let i = 0; i <= getDaysDiff(scanStart, scanEnd); i++) {
-           const candidateDate = addDays(scanStart, i);
-           const capacity = PlannerService.getDailyCapacity(candidateDate, settings, exceptions);
-           const capacityPoints = Math.max(0.1, capacity * 1.3);
-           const ratio = getLoad(candidateDate) / capacityPoints;
-           
-           if (ratio < minLoadRatio) {
-             minLoadRatio = ratio;
-             selectedDate = candidateDate;
-           }
+          const candidateDate = addDays(scanStart, i);
+          const capacity = PlannerService.getDailyCapacity(candidateDate, settings, exceptions);
+          const capacityPoints = Math.max(0.1, capacity * 1.3);
+          const ratio = getLoad(candidateDate) / capacityPoints;
+
+          if (ratio < minLoadRatio) {
+            minLoadRatio = ratio;
+            selectedDate = candidateDate;
+          }
         }
         bestDate = selectedDate;
         addLoad(bestDate, r.effort);
