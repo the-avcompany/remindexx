@@ -7,10 +7,10 @@ export enum Difficulty {
 }
 
 export enum StudyStage {
-  SCHOOL = 'school', // Escola (Fundamental/Médio)
-  CRAM_SCHOOL = 'cram_school', // Cursinho / Pré-vestibular
-  SELF_STUDY = 'self_study', // Estudando por conta própria
-  UNIVERSITY = 'university' // Faculdade / Universidade
+  HIGH_SCHOOL = 'high_school', // Ensino Médio
+  COLLEGE = 'college', // Faculdade
+  CONTEST = 'contest', // Concursos
+  SELF_LEARNING = 'self_learning' // Autodidata
 }
 
 export interface User {
@@ -58,7 +58,7 @@ export interface Review {
   date: string; // The currently scheduled date (due_date)
   status: ReviewStatus;
   feedback?: ReviewFeedback;
-  
+
   // Planner Fields
   windowStart: string; // Earliest allowed date
   windowEnd: string;   // Latest allowed date without penalty
@@ -92,7 +92,7 @@ export interface UserSettings {
   reviewIntervals: ReviewIntervals;
   theme: ThemeSettings;
   setupCompleted: boolean;
-  
+
   // Planner Settings
   paceMode: PaceMode;
   heavyDays: number[]; // 0=Sun, 1=Mon...
@@ -104,7 +104,7 @@ export interface DayException {
   userId: string;
   date: string;
   type: 'heavy' | 'unavailable' | 'exam';
-  capacityMultiplier: number; 
+  capacityMultiplier: number;
 }
 
 export type RetentionEventType = 'remembered' | 'forgot';

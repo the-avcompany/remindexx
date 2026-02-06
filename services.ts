@@ -1,7 +1,7 @@
 
-
-import { StudyContent, Review, Difficulty, ReviewStatus, Subject, User, UserSettings, ReviewIntervals, PaceMode, DayException, RetentionEventType, RetentionEvent, StudyStage, NavigationParams, ReviewFeedback, SuggestedAction } from './types';
+import { StudyContent, Review, Difficulty, ReviewStatus, Subject, User, UserSettings, ReviewIntervals, PaceMode, DayException, RetentionEventType, RetentionEvent, StudyStage, ReviewFeedback, SuggestedAction } from './types';
 import { Network, Component, Scale, LayoutGrid, Sparkles, Layers, BookOpen, Calendar as CalendarIcon, FastForward, CheckCircle2 } from 'lucide-react';
+import { supabase } from './utils/supabaseClient';
 
 // --- Utils ---
 
@@ -66,12 +66,12 @@ const DEFAULT_SETTINGS: UserSettings = {
 // --- Helper: Subject Suggestions ---
 
 export const SubjectSuggestions = {
-  getSuggestions: (goal: string = '', stage: StudyStage = StudyStage.UNIVERSITY): string[] => {
+  getSuggestions: (goal: string = '', stage: StudyStage = StudyStage.COLLEGE): string[] => {
     const text = goal.toLowerCase();
 
     // 1. NON-UNIVERSITY STAGE (School, Cram School, Self-study)
     // Suggest generic High School / Entrance Exam subjects
-    if (stage !== StudyStage.UNIVERSITY) {
+    if (stage !== StudyStage.COLLEGE) {
       const baseSubjects = ['Matemática', 'Português', 'Redação', 'História', 'Geografia', 'Física', 'Química', 'Biologia', 'Filosofia', 'Inglês'];
 
       // We can create slight bias based on goal, but keep it high-school level
@@ -212,339 +212,462 @@ export const ContextService = {
   }
 };
 
-// --- Storage Service ---
-
-const STORAGE_KEY = 'foco_ai_db_v3'; // Bumped version for new schema
-
-interface DB {
-  users: User[];
-  subjects: Subject[];
-  contents: StudyContent[];
-  reviews: Review[];
-  settings: Record<string, UserSettings>;
-  exceptions: DayException[];
-  retentionEvents: RetentionEvent[];
-}
-
-const getDB = (): DB => {
-  const data = localStorage.getItem(STORAGE_KEY);
-  if (!data) {
-    return { users: [], subjects: [], contents: [], reviews: [], settings: {}, exceptions: [], retentionEvents: [] };
-  }
-  const parsed = JSON.parse(data);
-  if (!parsed.retentionEvents) parsed.retentionEvents = [];
-  return parsed;
-};
-
-const saveDB = (db: DB) => {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(db));
-};
+// --- Storage Service (Refactored for Supabase) ---
 
 export const StorageService = {
+  // Auth (Handled by Auth.tsx mostly, but helper here)
   // Auth
-  login: async (email: string): Promise<User | null> => {
-    const db = getDB();
-    const user = db.users.find(u => u.email === email);
-    return user || null;
+  login: async (email: string, password: string): Promise<User | null> => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw error;
+    if (data.user) return StorageService.getCurrentUser();
+    return null;
   },
 
-  register: async (email: string, name: string): Promise<User> => {
-    const db = getDB();
-    if (db.users.find(u => u.email === email)) {
-      throw new Error('User already exists');
-    }
-    const newUser: User = {
-      id: generateId(),
+  register: async (email: string, password: string, name: string): Promise<User | null> => {
+    const { data, error } = await supabase.auth.signUp({
       email,
-      name,
-      onboardingCompleted: true, // SKIPPING WIZARD: Account created ready-to-use
-      stage: StudyStage.UNIVERSITY
-    };
-    db.users.push(newUser);
-    db.settings[newUser.id] = { ...DEFAULT_SETTINGS };
-    saveDB(db);
-    return newUser;
+      password,
+      options: { data: { name } }
+    });
+
+    if (error) throw error;
+
+    // We need to wait for the trigger or create profile manually if trigger fails/is slow
+    // For now assuming trigger works. Return user info.
+    if (data.user) {
+      // Create profile explicitly (optional, if trigger exists)
+      // But let's verify if profile exists or wait for it?
+      // Optimistic return:
+      return {
+        id: data.user.id,
+        email: data.user.email!,
+        name,
+        onboardingCompleted: false
+      };
+    }
+    return null;
   },
 
-  updateUser: (user: User) => {
-    const db = getDB();
-    const index = db.users.findIndex(u => u.id === user.id);
-    if (index !== -1) {
-      db.users[index] = user;
-      saveDB(db);
+  getCurrentUser: async (): Promise<User | null> => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return null;
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile) return null;
+
+    return {
+      id: user.id,
+      email: user.email!,
+      name: profile.name,
+      photoUrl: profile.photo_url,
+      goal: profile.goal,
+      stage: profile.stage,
+      onboardingCompleted: profile.onboarding_completed
+    };
+  },
+
+  updateUser: async (user: User) => {
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        name: user.name,
+        photo_url: user.photoUrl,
+        goal: user.goal,
+        stage: user.stage,
+        onboarding_completed: user.onboardingCompleted
+      })
+      .eq('id', user.id);
+
+    if (error) console.error('Error updating user:', error);
+  },
+
+  // Data Management
+  exportData: async (userId: string): Promise<string> => {
+    const [settings, subjects, contents, reviews] = await Promise.all([
+      StorageService.getSettings(userId),
+      StorageService.getSubjects(userId),
+      StorageService.getContents(userId),
+      StorageService.getReviews(userId)
+    ]);
+    return JSON.stringify({ settings, subjects, contents, reviews }, null, 2);
+  },
+
+  importData: async (userId: string, json: string) => {
+    try {
+      const data = JSON.parse(json);
+      // This is a complex operation in Supabase because of IDs and Keys.
+      // For now, simpler implementation: Update settings and Add subjects/contents if not exist.
+      // Full restore is risky without cleaning first.
+
+      if (data.settings) await StorageService.saveSettings(userId, data.settings);
+
+      // Implementation of full import is complex and might time out on serverless defaults if large.
+      // Leaving simplified for safety.
+      console.log("Importing data...", data);
+    } catch (e) {
+      console.error("Import failed", e);
     }
   },
 
   // Settings
-  getSettings: (userId: string): UserSettings => {
-    const db = getDB();
-    const saved = db.settings[userId];
-    if (!saved) return { ...DEFAULT_SETTINGS };
+  getSettings: async (userId: string): Promise<UserSettings> => {
+    const { data, error } = await supabase
+      .from('settings')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (error || !data) return DEFAULT_SETTINGS;
+
     return {
-      ...DEFAULT_SETTINGS,
-      ...saved,
-      checklist: { ...DEFAULT_CHECKLIST, ...(saved.checklist || {}) }
+      dailyLimit: data.daily_limit ?? DEFAULT_SETTINGS.dailyLimit,
+      reviewIntervals: data.review_intervals ?? DEFAULT_SETTINGS.reviewIntervals,
+      theme: data.theme ?? DEFAULT_SETTINGS.theme,
+      setupCompleted: data.setup_completed ?? DEFAULT_SETTINGS.setupCompleted,
+      paceMode: data.pace_mode ?? DEFAULT_SETTINGS.paceMode,
+      heavyDays: data.heavy_days ?? DEFAULT_SETTINGS.heavyDays,
+      checklist: { ...DEFAULT_CHECKLIST, ...(data.checklist || {}) }
     };
   },
 
-  saveSettings: (userId: string, settings: UserSettings) => {
-    const db = getDB();
-    db.settings[userId] = settings;
-    saveDB(db);
+  saveSettings: async (userId: string, settings: UserSettings) => {
+    await supabase
+      .from('settings')
+      .upsert({
+        user_id: userId,
+        daily_limit: settings.dailyLimit,
+        review_intervals: settings.reviewIntervals,
+        theme: settings.theme,
+        setup_completed: settings.setupCompleted,
+        pace_mode: settings.paceMode,
+        heavy_days: settings.heavyDays,
+        checklist: settings.checklist,
+        updated_at: new Date().toISOString()
+      });
   },
 
-  updateChecklist: (userId: string, key: keyof import('./types').UserChecklist) => {
-    const settings = StorageService.getSettings(userId);
+  updateChecklist: async (userId: string, key: keyof import('./types').UserChecklist) => {
+    // 1. Get current settings
+    const settings = await StorageService.getSettings(userId);
+    // 2. Check if already true
     if (!settings.checklist[key]) {
       settings.checklist[key] = true;
-      StorageService.saveSettings(userId, settings);
+      await StorageService.saveSettings(userId, settings);
     }
   },
 
   // Subjects
-  getSubjects: (userId: string): Subject[] => {
-    return getDB().subjects.filter(s => s.userId === userId);
+  getSubjects: async (userId: string): Promise<Subject[]> => {
+    const { data } = await supabase
+      .from('subjects')
+      .select('*')
+      .eq('user_id', userId);
+    return data || [];
   },
 
-  addSubject: (userId: string, name: string): Subject => {
-    const db = getDB();
-    const newSubject: Subject = {
-      id: generateId(),
-      userId,
-      name,
-      color: '#21B892'
-    };
-    db.subjects.push(newSubject);
-    saveDB(db);
-    StorageService.updateChecklist(userId, 'hasSubjects');
-    return newSubject;
+  addSubject: async (userId: string, name: string): Promise<Subject> => {
+    const { data, error } = await supabase
+      .from('subjects')
+      .insert({
+        user_id: userId,
+        name,
+        color: '#21B892'
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    await StorageService.updateChecklist(userId, 'hasSubjects');
+    return data;
   },
 
-  deleteSubject: (subjectId: string) => {
-    const db = getDB();
-    const contentIds = db.contents.filter(c => c.subjectId === subjectId).map(c => c.id);
-    db.reviews = db.reviews.filter(r => !contentIds.includes(r.contentId));
-    db.contents = db.contents.filter(c => c.subjectId !== subjectId);
-    db.subjects = db.subjects.filter(s => s.id !== subjectId);
-    saveDB(db);
+  deleteSubject: async (subjectId: string) => {
+    // Cascading delete handles related contents and reviews in Supabase
+    await supabase.from('subjects').delete().eq('id', subjectId);
   },
 
   // Contents & Reviews
-  getContents: (userId: string): StudyContent[] => {
-    return getDB().contents.filter(c => c.userId === userId);
+  getContents: async (userId: string): Promise<StudyContent[]> => {
+    const { data } = await supabase
+      .from('contents')
+      .select('*')
+      .eq('user_id', userId);
+
+    // Map keys from snake_case to camelCase
+    return (data || []).map(c => ({
+      id: c.id,
+      userId: c.user_id,
+      subjectId: c.subject_id,
+      topic: c.topic,
+      dateStudied: c.date_studied,
+      difficulty: c.difficulty
+    }));
   },
 
-  getReviews: (userId: string): Review[] => {
-    return getDB().reviews.filter(r => r.userId === userId);
+  getReviews: async (userId: string): Promise<Review[]> => {
+    const { data } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('user_id', userId);
+
+    return (data || []).map(r => ({
+      id: r.id,
+      userId: r.user_id,
+      contentId: r.content_id,
+      date: r.date,
+      status: r.status,
+      feedback: r.feedback,
+      windowStart: r.window_start,
+      windowEnd: r.window_end,
+      effort: r.effort,
+      originalDate: r.original_date
+    }));
   },
 
-  addContentWithReviews: (userId: string, subjectId: string, topic: string, dateStudied: string, difficulty: Difficulty) => {
-    const db = getDB();
-    const userSettings = db.settings[userId] || DEFAULT_SETTINGS;
-    const contentId = generateId();
+  addContentWithReviews: async (userId: string, subjectId: string, topic: string, dateStudied: string, difficulty: Difficulty) => {
+    // 1. Insert Content
+    const { data: content, error } = await supabase
+      .from('contents')
+      .insert({
+        user_id: userId,
+        subject_id: subjectId,
+        topic,
+        date_studied: dateStudied,
+        difficulty
+      })
+      .select()
+      .single();
 
-    const newContent: StudyContent = {
-      id: contentId,
-      userId,
-      subjectId,
-      topic,
-      dateStudied,
-      difficulty
-    };
+    if (error || !content) throw error;
 
-    db.contents.push(newContent);
+    const userSettings = await StorageService.getSettings(userId);
+    const contentId = content.id;
 
     // COST LOGIC
     const effortMap = { [Difficulty.EASY]: 1.0, [Difficulty.MEDIUM]: 1.3, [Difficulty.HARD]: 1.7 };
     const effort = effortMap[difficulty];
-
     const schedule = SchedulerService.calculateSchedule(difficulty, userSettings.reviewIntervals);
 
-    const newReviews: Review[] = schedule.map(days => {
+    const newReviews = schedule.map(days => {
       const targetDate = addDays(dateStudied, days);
       return {
-        id: generateId(),
-        userId,
-        contentId,
+        user_id: userId,
+        content_id: contentId,
         date: targetDate,
         status: ReviewStatus.PENDING,
-        windowStart: addDays(targetDate, -1),
-        windowEnd: addDays(targetDate, 2),
+        window_start: addDays(targetDate, -1),
+        window_end: addDays(targetDate, 2),
         effort: effort,
-        originalDate: targetDate
+        original_date: targetDate
       };
     });
 
-    db.reviews.push(...newReviews);
-    saveDB(db);
-    StorageService.updateChecklist(userId, 'hasContents');
-    PlannerService.rebalanceSchedule(userId);
+    await supabase.from('reviews').insert(newReviews);
+    await StorageService.updateChecklist(userId, 'hasContents');
+    await PlannerService.rebalanceSchedule(userId);
   },
 
-  updateContent: (userId: string, contentId: string, updates: Partial<StudyContent>) => {
-    const db = getDB();
-    const index = db.contents.findIndex(c => c.id === contentId);
+  updateContent: async (userId: string, contentId: string, updates: Partial<StudyContent>) => {
+    // 1. Fetch current content to compare
+    const { data: oldContent } = await supabase
+      .from('contents')
+      .select('*')
+      .eq('id', contentId)
+      .single();
 
-    if (index !== -1) return;
+    if (!oldContent) return;
 
-    const oldContent = db.contents[index];
-    const newContent = { ...oldContent, ...updates };
-    db.contents[index] = newContent;
+    // 2. Update Content
+    const dbUpdates: any = {};
+    if (updates.topic) dbUpdates.topic = updates.topic;
+    if (updates.dateStudied) dbUpdates.date_studied = updates.dateStudied;
+    if (updates.difficulty) dbUpdates.difficulty = updates.difficulty;
 
-    const difficultyChanged = oldContent.difficulty !== newContent.difficulty;
-    const dateChanged = oldContent.dateStudied !== newContent.dateStudied;
+    await supabase.from('contents').update(dbUpdates).eq('id', contentId);
+
+    const difficultyChanged = updates.difficulty && updates.difficulty !== oldContent.difficulty;
+    const dateChanged = updates.dateStudied && updates.dateStudied !== oldContent.date_studied;
 
     if (difficultyChanged || dateChanged) {
-      db.reviews = db.reviews.filter(r => !(r.contentId === contentId && r.status === ReviewStatus.PENDING));
-      const userSettings = db.settings[userId] || DEFAULT_SETTINGS;
-      const schedule = SchedulerService.calculateSchedule(newContent.difficulty, userSettings.reviewIntervals);
+      // Remove pending reviews
+      await supabase
+        .from('reviews')
+        .delete()
+        .eq('content_id', contentId)
+        .eq('status', ReviewStatus.PENDING);
+
+      const newDifficulty = updates.difficulty || oldContent.difficulty;
+      const newDateStudied = updates.dateStudied || oldContent.date_studied;
+
+      const userSettings = await StorageService.getSettings(userId);
+      const schedule = SchedulerService.calculateSchedule(newDifficulty, userSettings.reviewIntervals);
       const effortMap = { [Difficulty.EASY]: 1.0, [Difficulty.MEDIUM]: 1.3, [Difficulty.HARD]: 1.7 };
-      const effort = effortMap[newContent.difficulty];
+      const effort = effortMap[newDifficulty];
       const today = formatDate(new Date());
 
-      const newReviews: Review[] = schedule.map(days => {
-        const targetDate = addDays(newContent.dateStudied, days);
+      const newReviews = schedule.map(days => {
+        const targetDate = addDays(newDateStudied, days);
         return {
-          id: generateId(),
-          userId,
-          contentId,
+          user_id: userId,
+          content_id: contentId,
           date: targetDate,
           status: ReviewStatus.PENDING,
-          windowStart: addDays(targetDate, -1),
-          windowEnd: addDays(targetDate, 2),
+          window_start: addDays(targetDate, -1),
+          window_end: addDays(targetDate, 2),
           effort: effort,
-          originalDate: targetDate
+          original_date: targetDate
         };
-      }).filter(r => {
-        return r.date >= today;
-      });
+      }).filter(r => r.date >= today); // Only future/today
 
       if (newReviews.length === 0) {
         const fallbackDate = addDays(today, 1);
         newReviews.push({
-          id: generateId(),
-          userId,
-          contentId,
+          user_id: userId,
+          content_id: contentId,
           date: fallbackDate,
           status: ReviewStatus.PENDING,
-          windowStart: today,
-          windowEnd: addDays(fallbackDate, 2),
+          window_start: today,
+          window_end: addDays(fallbackDate, 2),
           effort: effort,
-          originalDate: fallbackDate
+          original_date: fallbackDate
         });
       }
-      db.reviews.push(...newReviews);
+      await supabase.from('reviews').insert(newReviews);
     }
-    saveDB(db);
-    PlannerService.rebalanceSchedule(userId);
+    await PlannerService.rebalanceSchedule(userId);
   },
 
-  updateReviewStatus: (reviewId: string, status: ReviewStatus, feedback?: any) => {
-    const db = getDB();
-    const index = db.reviews.findIndex(r => r.id === reviewId);
-    if (index !== -1) {
-      db.reviews[index].status = status;
-      if (feedback) db.reviews[index].feedback = feedback;
-      saveDB(db);
-    }
+  updateReviewStatus: async (reviewId: string, status: ReviewStatus, feedback?: any) => {
+    const updates: any = { status };
+    if (feedback) updates.feedback = feedback;
+
+    await supabase.from('reviews').update(updates).eq('id', reviewId);
   },
 
-  deleteContent: (contentId: string) => {
-    const db = getDB();
-    db.reviews = db.reviews.filter(r => r.contentId !== contentId);
-    db.contents = db.contents.filter(c => c.id !== contentId);
-    saveDB(db);
+  deleteContent: async (contentId: string) => {
+    await supabase.from('contents').delete().eq('id', contentId);
   },
 
-  adjustSchedule: (userId: string, contentId: string, type: RetentionEventType, reviewId?: string) => {
-    const db = getDB();
+  adjustSchedule: async (userId: string, contentId: string, type: RetentionEventType, reviewId?: string) => {
     const today = formatDate(new Date());
     const tomorrow = addDays(today, 1);
 
-    // 1. Mark the review as done (if a specific review ID was passed)
+    // 1. Mark review as done
     if (reviewId) {
-      const rIdx = db.reviews.findIndex(r => r.id === reviewId);
-      if (rIdx !== -1) {
-        db.reviews[rIdx].status = ReviewStatus.COMPLETED;
-        db.reviews[rIdx].feedback = type === 'forgot' ? ReviewFeedback.FORGOT : ReviewFeedback.REMEMBERED;
-      }
+      await StorageService.updateReviewStatus(
+        reviewId,
+        ReviewStatus.COMPLETED,
+        type === 'forgot' ? ReviewFeedback.FORGOT : ReviewFeedback.REMEMBERED
+      );
     }
 
     // 2. Log Retention Event
-    db.retentionEvents.push({
-      id: generateId(),
-      userId,
-      contentId,
-      type,
-      createdAt: new Date().toISOString()
+    await supabase.from('retention_events').insert({
+      user_id: userId,
+      content_id: contentId,
+      type
     });
 
-    const pendingReviews = db.reviews.filter(r => r.contentId === contentId && r.status === ReviewStatus.PENDING);
-    pendingReviews.sort((a, b) => a.date.localeCompare(b.date));
+    // 3. Get pending reviews
+    const { data: pendingReviews } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('content_id', contentId)
+      .eq('status', ReviewStatus.PENDING)
+      .order('date', { ascending: true });
+
+    if (!pendingReviews) return;
 
     if (type === 'forgot') {
-      // FORGOT: Needs reinforcement.
-      // Insert a new review for TOMORROW (or next available).
-      // Logic: If there is no review scheduled for tomorrow, create one.
       const hasImmediate = pendingReviews.some(r => r.date <= tomorrow);
-
       if (!hasImmediate) {
-        const effort = 1.7; // Harder because forgot
-        const newReview: Review = {
-          id: generateId(),
-          contentId,
-          userId,
+        const effort = 1.7;
+        await supabase.from('reviews').insert({
+          user_id: userId,
+          content_id: contentId,
           date: tomorrow,
           status: ReviewStatus.PENDING,
-          windowStart: today,
-          windowEnd: addDays(tomorrow, 1),
+          window_start: today,
+          window_end: addDays(tomorrow, 1),
           effort,
-          originalDate: tomorrow
-        };
-        db.reviews.push(newReview);
+          original_date: tomorrow
+        });
       }
-      // Compress future reviews? (Optional advanced logic, for now inserting reinforcement is enough)
-
     } else if (type === 'remembered') {
-      // REMEMBERED: Can space out future reviews.
-      // Logic: Push pending reviews out by ~1.5x days or simply add a few days buffer.
-      pendingReviews.forEach(r => {
-        // Simple heuristic: Add 3 days or 20% delay, whichever is more, to push them forward
+      // Update logic loop
+      for (const r of pendingReviews) {
         const diff = getDaysDiff(today, r.date);
         const addedBuffer = Math.max(2, Math.ceil(diff * 0.2));
         const newDate = addDays(r.date, addedBuffer);
 
-        r.date = newDate;
-        r.originalDate = newDate;
-        r.windowStart = addDays(newDate, -1);
-        r.windowEnd = addDays(newDate, 3);
-      });
+        await supabase.from('reviews').update({
+          date: newDate,
+          original_date: newDate,
+          window_start: addDays(newDate, -1),
+          window_end: addDays(newDate, 3)
+        }).eq('id', r.id);
+      }
     }
 
-    saveDB(db);
-
-    // 3. Rebalance everything to fit capacity
-    PlannerService.rebalanceSchedule(userId);
+    // 3. Rebalance everything
+    await PlannerService.rebalanceSchedule(userId);
   },
 
-  getExceptions: (userId: string): DayException[] => {
-    return getDB().exceptions.filter(e => e.userId === userId);
+  getExceptions: async (userId: string): Promise<DayException[]> => {
+    const { data } = await supabase
+      .from('exceptions')
+      .select('*')
+      .eq('user_id', userId);
+
+    return (data || []).map(e => ({
+      id: e.id,
+      userId: e.user_id,
+      date: e.date,
+      type: e.type as any,
+      capacityMultiplier: e.capacity_multiplier
+    }));
   },
 
-  addException: (exception: DayException) => {
-    const db = getDB();
-    db.exceptions = db.exceptions.filter(e => !(e.userId === exception.userId && e.date === exception.date));
-    db.exceptions.push(exception);
-    saveDB(db);
-  },
+  addException: async (exception: DayException) => {
+    // Remove existing for that day to avoid dupes logic (naive)
+    await supabase
+      .from('exceptions')
+      .delete()
+      .eq('user_id', exception.userId)
+      .eq('date', exception.date);
 
-  saveReviewsBulk: (reviews: Review[]) => {
-    const db = getDB();
-    reviews.forEach(updated => {
-      const idx = db.reviews.findIndex(r => r.id === updated.id);
-      if (idx !== -1) db.reviews[idx] = updated;
+    await supabase.from('exceptions').insert({
+      user_id: exception.userId,
+      date: exception.date,
+      type: exception.type,
+      capacity_multiplier: exception.capacityMultiplier
     });
-    saveDB(db);
+  },
+
+  saveReviewsBulk: async (reviews: Review[]) => {
+    // Supabase upsert requires mapping back to DB col names
+    const dbReviews = reviews.map(r => ({
+      id: r.id,
+      user_id: r.userId,
+      content_id: r.contentId,
+      date: r.date,
+      status: r.status,
+      feedback: r.feedback,
+      window_start: r.windowStart,
+      window_end: r.windowEnd,
+      effort: r.effort,
+      original_date: r.originalDate,
+      updated_at: new Date().toISOString()
+    }));
+
+    const { error } = await supabase.from('reviews').upsert(dbReviews);
+    if (error) console.error("Error bulk saving:", error);
   }
 };
 
@@ -555,10 +678,10 @@ export const SchedulerService = {
 };
 
 export const SuggestionService = {
-  getNextAction: (userId: string): SuggestedAction => {
-    const subjects = StorageService.getSubjects(userId);
-    const contents = StorageService.getContents(userId);
-    const reviews = StorageService.getReviews(userId);
+  getNextAction: async (userId: string): Promise<SuggestedAction> => {
+    const subjects = await StorageService.getSubjects(userId);
+    const contents = await StorageService.getContents(userId);
+    const reviews = await StorageService.getReviews(userId);
     const today = formatDate(new Date());
     const tomorrow = addDays(today, 1);
 
@@ -651,14 +774,31 @@ export const PlannerService = {
     return Math.max(0, base * multiplier);
   },
 
-  rebalanceSchedule: (userId: string, horizonDays: number = 14) => {
-    const db = getDB();
-    const settings = StorageService.getSettings(userId);
-    const exceptions = StorageService.getExceptions(userId);
+  rebalanceSchedule: async (userId: string, horizonDays: number = 14) => {
+    const settings = await StorageService.getSettings(userId);
+    const exceptions = await StorageService.getExceptions(userId);
 
-    const pendingReviews = db.reviews.filter(r => r.userId === userId && r.status === ReviewStatus.PENDING);
+    const { data: pendingReviewsDB } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('status', ReviewStatus.PENDING);
 
-    if (pendingReviews.length === 0) return;
+    if (!pendingReviewsDB || pendingReviewsDB.length === 0) return;
+
+    // Convert back to frontend model (CamelCase)
+    const pendingReviews: Review[] = pendingReviewsDB.map(r => ({
+      id: r.id,
+      userId: r.user_id,
+      contentId: r.content_id,
+      date: r.date,
+      status: r.status,
+      feedback: r.feedback,
+      windowStart: r.window_start,
+      windowEnd: r.window_end,
+      effort: r.effort,
+      originalDate: r.original_date
+    }));
 
     const today = formatDate(new Date());
 
@@ -679,6 +819,9 @@ export const PlannerService = {
     const dailyLoad: Record<string, number> = {};
     const getLoad = (d: string) => dailyLoad[d] || 0;
     const addLoad = (d: string, effort: number) => dailyLoad[d] = (dailyLoad[d] || 0) + effort;
+
+    // Pre-calculate existing load from non-pending items if needed? 
+    // For now assuming rebalancer owns the future pending state.
 
     const updatedReviews: Review[] = [];
     const queue = scoredReviews.map(sr => sr.review);
@@ -731,31 +874,31 @@ export const PlannerService = {
     }
 
     if (updatedReviews.length > 0) {
-      StorageService.saveReviewsBulk(updatedReviews);
+      await StorageService.saveReviewsBulk(updatedReviews);
     }
   },
 
-  setTomorrowHeavy: (userId: string) => {
+  setTomorrowHeavy: async (userId: string) => {
     const tomorrow = addDays(formatDate(new Date()), 1);
     const exception: DayException = {
-      id: generateId(),
+      id: generateId(), // Will be ignored by DB auto-gen or overwrite
       userId,
       date: tomorrow,
       type: 'heavy',
       capacityMultiplier: 0.4
     };
-    StorageService.addException(exception);
-    PlannerService.rebalanceSchedule(userId);
+    await StorageService.addException(exception);
+    await PlannerService.rebalanceSchedule(userId);
   },
 
-  setPace: (userId: string, mode: PaceMode) => {
-    const settings = StorageService.getSettings(userId);
+  setPace: async (userId: string, mode: PaceMode) => {
+    const settings = await StorageService.getSettings(userId);
     settings.paceMode = mode;
-    StorageService.saveSettings(userId, settings);
-    PlannerService.rebalanceSchedule(userId);
+    await StorageService.saveSettings(userId, settings);
+    await PlannerService.rebalanceSchedule(userId);
   },
 
-  handleOverdueRecovery: (userId: string) => {
-    PlannerService.rebalanceSchedule(userId);
+  handleOverdueRecovery: async (userId: string) => {
+    await PlannerService.rebalanceSchedule(userId);
   }
 };

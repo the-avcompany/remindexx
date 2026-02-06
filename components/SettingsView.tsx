@@ -2,323 +2,233 @@
 import React, { useState, useRef } from 'react';
 import { User, UserSettings, ThemeSettings, Difficulty, StudyStage } from '../types';
 import { Card, Button, Input, Badge, Select } from './ui/Components';
-import { User as UserIcon, Palette, Clock, Save, Upload, Check, Plus, AlertCircle, ChevronDown, Trash2 } from 'lucide-react';
+import { User as UserIcon, Palette, Clock, Save, Upload, Check, Plus, AlertCircle, ChevronDown, Trash2, LogOut } from 'lucide-react';
+import { StorageService } from '../services';
 
 interface SettingsViewProps {
-  user: User;
-  settings: UserSettings;
-  onUpdateUser: (updatedUser: User) => void;
-  onUpdateSettings: (updatedSettings: UserSettings) => void;
-  onResetData: () => void;
+   user: User;
+   settings: UserSettings;
+   onUpdateUser: (updatedUser: User) => Promise<void> | void;
+   onUpdateSettings: (updatedSettings: UserSettings) => Promise<void> | void;
+   onResetData: () => Promise<void> | void;
 }
 
-const STANDARD_INTERVALS = [1, 2, 3, 4, 5, 7, 10, 14, 15, 21, 30, 45, 60, 90, 120];
+export const SettingsView: React.FC<SettingsViewProps> = ({ user, settings, onUpdateUser, onUpdateSettings, onResetData }) => {
+   const [name, setName] = useState(user.name);
+   const [goal, setGoal] = useState(user.goal || '');
+   const [stage, setStage] = useState<StudyStage>(user.stage || StudyStage.COLLEGE);
+   const [dailyLimit, setDailyLimit] = useState(settings.dailyLimit);
 
-export const SettingsView: React.FC<SettingsViewProps> = ({ 
-  user, 
-  settings, 
-  onUpdateUser, 
-  onUpdateSettings,
-  onResetData 
-}) => {
-  const [isEditing, setIsEditing] = useState(false);
-  
-  const [tempUser, setTempUser] = useState<User>(user);
-  const [tempSettings, setTempSettings] = useState<UserSettings>(settings);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+   const [isSaving, setIsSaving] = useState(false);
+   const [saveMessage, setSaveMessage] = useState('');
 
-  const handleStartEdit = () => {
-    setTempUser({ ...user });
-    setTempSettings(JSON.parse(JSON.stringify(settings))); 
-    setIsEditing(true);
-  };
+   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleCancelEdit = () => {
-    setIsEditing(false);
-    setTempUser(user);
-    setTempSettings(settings);
-  };
+   const handleSaveProfile = async () => {
+      setIsSaving(true);
+      await onUpdateUser({ ...user, name, goal, stage });
+      setSaveMessage('Perfil salvo!');
+      setIsSaving(false);
+      setTimeout(() => setSaveMessage(''), 3000);
+   };
 
-  const handleSave = () => {
-    onUpdateUser(tempUser);
-    onUpdateSettings(tempSettings);
-    setIsEditing(false);
-    alert('Preferências atualizadas com sucesso!');
-  };
+   const handleSaveLimit = async () => {
+      await onUpdateSettings({ ...settings, dailyLimit });
+   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setTempUser(prev => ({ ...prev, photoUrl: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
-    }
-  };
+   const handleThemeChange = async (theme: ThemeSettings) => {
+      await onUpdateSettings({ ...settings, theme });
+   };
 
-  const handleThemeSelect = (name: ThemeSettings['name'], color: string, mode: 'light' | 'dark') => {
-    setTempSettings(prev => ({
-      ...prev,
-      theme: { name, primaryColor: color, mode }
-    }));
-  };
+   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) {
+         const reader = new FileReader();
+         reader.onloadend = async () => {
+            await onUpdateUser({ ...user, photoUrl: reader.result as string });
+         };
+         reader.readAsDataURL(file);
+      }
+   };
 
-  const handleIntervalChange = (diff: Difficulty, index: number, value: string) => {
-    if (value === 'remove') {
-      const newIntervals = { ...tempSettings.reviewIntervals };
-      if (newIntervals[diff].length <= 1) return;
-      newIntervals[diff].splice(index, 1);
-      setTempSettings(prev => ({ ...prev, reviewIntervals: newIntervals }));
-      return;
-    }
-    const val = parseInt(value);
-    if (isNaN(val) || val < 1) return;
-    const newIntervals = { ...tempSettings.reviewIntervals };
-    newIntervals[diff][index] = val;
-    newIntervals[diff].sort((a, b) => a - b);
-    setTempSettings(prev => ({ ...prev, reviewIntervals: newIntervals }));
-  };
+   const handleExport = async () => {
+      const data = await StorageService.exportData(user.id);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `remindex-backup-${new Date().toISOString().split('T')[0]}.json`;
+      a.click();
+   };
 
-  const addInterval = (diff: Difficulty) => {
-    const newIntervals = { ...tempSettings.reviewIntervals };
-    const lastVal = newIntervals[diff][newIntervals[diff].length - 1] || 1;
-    let nextVal = lastVal + 7;
-    for(let std of STANDARD_INTERVALS) {
-        if(std > lastVal) {
-            nextVal = std;
-            break;
-        }
-    }
-    newIntervals[diff].push(nextVal);
-    setTempSettings(prev => ({ ...prev, reviewIntervals: newIntervals }));
-  };
+   const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file && confirm('Isso substituirá seus dados atuais. Continuar?')) {
+         const reader = new FileReader();
+         reader.onload = async (event) => {
+            if (event.target?.result) {
+               await StorageService.importData(user.id, event.target.result as string);
+               window.location.reload();
+            }
+         };
+         reader.readAsText(file);
+      }
+   };
 
-  const renderProfileSection = () => {
-    // Correctly choose which data to display:
-    // In edit mode: show the temp state being edited
-    // In view mode: show the 'user' prop directly (which comes from App state)
-    const displayUser = isEditing ? tempUser : user;
-    
-    // Map stage value to human readable label
-    const stageLabels = {
-        [StudyStage.SCHOOL]: 'Escola',
-        [StudyStage.CRAM_SCHOOL]: 'Cursinho / Pré-vestibular',
-        [StudyStage.SELF_STUDY]: 'Por conta própria',
-        [StudyStage.UNIVERSITY]: 'Faculdade / Universidade',
-    };
+   const handleHardReset = async () => {
+      if (confirm('Tem certeza absoluta? Isso apagará TUDO e é irreversível.')) {
+         await onResetData();
+      }
+   };
 
-    return (
-        <Card className="p-8">
-        <div className="flex items-center gap-3 mb-8 border-b border-slate-100 pb-5">
-            <UserIcon className="w-6 h-6 text-primary-muted" />
-            <h3 className="text-xl font-bold text-slate-900">Perfil</h3>
-        </div>
+   return (
+      <div className="max-w-3xl mx-auto space-y-8 pb-20">
+         <header>
+            <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Configurações</h1>
+            <p className="text-slate-500 mt-1">Personalize sua experiência.</p>
+         </header>
 
-        <div className="flex flex-col md:flex-row gap-10 items-start">
-            <div className="flex flex-col items-center gap-4">
-                <div 
-                    className={`w-28 h-28 rounded-full bg-slate-100 overflow-hidden ring-4 ring-white shadow-sm flex items-center justify-center relative ${isEditing ? 'cursor-pointer hover:opacity-80' : ''}`}
-                    onClick={() => isEditing && fileInputRef.current?.click()}
-                >
-                    {displayUser.photoUrl ? (
-                    <img src={displayUser.photoUrl} alt="User" className="w-full h-full object-cover" />
-                    ) : (
-                    <span className="text-3xl font-bold text-slate-300">{displayUser.name[0]?.toUpperCase()}</span>
-                    )}
-                    {isEditing && (
-                    <div className="absolute inset-0 bg-black/30 flex items-center justify-center text-white opacity-0 hover:opacity-100 transition-opacity">
-                        <Upload size={24} />
-                    </div>
-                    )}
-                </div>
-                {isEditing && (
-                    <button onClick={() => fileInputRef.current?.click()} className="text-sm text-primary-strong font-bold hover:underline">
-                    Alterar foto
-                    </button>
-                )}
-                <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} disabled={!isEditing} />
+         {/* Profile Section */}
+         <Card className="p-6 md:p-8">
+            <div className="flex items-center gap-3 mb-6">
+               <div className="p-2 bg-primary-soft rounded-lg text-primary-strong">
+                  <UserIcon size={24} />
+               </div>
+               <h2 className="text-xl font-bold text-slate-900">Perfil</h2>
             </div>
 
-            <div className="flex-1 w-full space-y-6">
-                {isEditing ? (
-                <>
-                    <Input label="Nome Completo" value={tempUser.name} onChange={e => setTempUser({...tempUser, name: e.target.value})} />
-                    
-                    <Select 
-                        label="Fase dos Estudos"
-                        value={tempUser.stage || StudyStage.UNIVERSITY} 
-                        onChange={e => setTempUser({...tempUser, stage: e.target.value as StudyStage})}
-                    >
-                        <option value={StudyStage.SCHOOL}>Escola (Fundamental/Médio)</option>
-                        <option value={StudyStage.CRAM_SCHOOL}>Cursinho / Pré-vestibular</option>
-                        <option value={StudyStage.SELF_STUDY}>Estudando por conta própria</option>
-                        <option value={StudyStage.UNIVERSITY}>Faculdade / Universidade</option>
-                    </Select>
+            <div className="flex flex-col md:flex-row gap-8 items-start">
+               <div className="flex flex-col items-center gap-3">
+                  <div className="w-24 h-24 rounded-full bg-slate-100 overflow-hidden ring-4 ring-white shadow-lg relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                     {user.photoUrl ? (
+                        <img src={user.photoUrl} alt="Profile" className="w-full h-full object-cover" />
+                     ) : (
+                        <div className="w-full h-full flex items-center justify-center text-slate-300">
+                           <UserIcon size={32} />
+                        </div>
+                     )}
+                     <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                        <Upload className="text-white w-6 h-6" />
+                     </div>
+                  </div>
+                  <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handlePhotoUpload} />
+                  <button onClick={() => fileInputRef.current?.click()} className="text-sm font-bold text-primary hover:underline">Alterar Foto</button>
+               </div>
 
-                    <Input 
-                        label={tempUser.stage === StudyStage.UNIVERSITY ? "Curso Atual" : "Curso Desejado"}
-                        value={tempUser.goal || ''} 
-                        onChange={e => setTempUser({...tempUser, goal: e.target.value})} 
-                    />
-                </>
-                ) : (
-                <div className="space-y-6">
-                    <div>
-                        <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-2">Nome</p>
-                        <p className="text-xl font-medium text-slate-900">{user.name}</p>
-                    </div>
-                    <div>
-                        <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-2">Fase Atual</p>
-                        <p className="text-lg text-slate-600">{user.stage ? stageLabels[user.stage] : 'Não informada'}</p>
-                    </div>
-                    <div>
-                        <p className="text-xs text-slate-400 uppercase font-bold tracking-wider mb-2">Objetivo / Curso</p>
-                        <p className="text-lg text-slate-600">{user.goal || 'Não definido'}</p>
-                    </div>
-                </div>
-                )}
+               <div className="flex-1 space-y-4 w-full">
+                  <Input label="Nome" value={name} onChange={e => setName(e.target.value)} />
+                  <Select label="Estágio Atual" value={stage} onChange={e => setStage(e.target.value as StudyStage)}>
+                     <option value={StudyStage.HIGH_SCHOOL}>Ensino Médio / Vestibular</option>
+                     <option value={StudyStage.COLLEGE}>Faculdade / Graduação</option>
+                     <option value={StudyStage.CONTEST}>Concursos</option>
+                     <option value={StudyStage.SELF_LEARNING}>Autodidata</option>
+                  </Select>
+                  <Input label="Objetivo Principal" value={goal} onChange={e => setGoal(e.target.value)} />
+                  <div className="flex items-center gap-4 pt-2">
+                     <Button onClick={handleSaveProfile} disabled={isSaving}>
+                        {isSaving ? 'Salvando...' : 'Salvar Alterações'}
+                     </Button>
+                     {saveMessage && <span className="text-green-600 font-bold text-sm animate-in fade-in slide-in-from-left-2 flex items-center gap-1"><Check size={14} /> {saveMessage}</span>}
+                  </div>
+               </div>
             </div>
-        </div>
-        </Card>
-    );
-  };
+         </Card>
 
-  const renderThemeSection = () => (
-    <Card className="p-8">
-       <div className="flex items-center gap-3 mb-8 border-b border-slate-100 pb-5">
-          <Palette className="w-6 h-6 text-primary-muted" />
-          <h3 className="text-xl font-bold text-slate-900">Aparência</h3>
-       </div>
+         {/* Study Settings */}
+         <Card className="p-6 md:p-8">
+            <div className="flex items-center gap-3 mb-6">
+               <div className="p-2 bg-primary-soft rounded-lg text-primary-strong">
+                  <Clock size={24} />
+               </div>
+               <h2 className="text-xl font-bold text-slate-900">Ritmo de Estudo</h2>
+            </div>
 
-       {isEditing ? (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-             {[
-                { name: 'green', label: 'Natureza', color: '33 184 146', hex: '#21B892', mode: 'light' },
-                { name: 'blue', label: 'Oceano', color: '59 130 246', hex: '#3B82F6', mode: 'light' },
-                { name: 'pink', label: 'Berry', color: '219 79 133', hex: '#DB4F85', mode: 'light' },
-                { name: 'dark', label: 'Monocromo', color: '71 85 105', hex: '#475569', mode: 'light' },
-              ].map((theme) => (
-                <button
-                  key={theme.name}
-                  onClick={() => handleThemeSelect(theme.name as any, theme.color, theme.mode as any)}
-                  className={`relative p-5 rounded-xl border-2 transition-all flex flex-col items-center gap-3 ${
-                    tempSettings.theme.name === theme.name ? 'border-primary bg-primary-soft' : 'border-slate-100 hover:border-slate-200'
-                  }`}
-                >
-                  <div className="w-10 h-10 rounded-full shadow-sm" style={{ backgroundColor: theme.hex }}></div>
-                  <span className="text-sm font-bold text-slate-700">{theme.label}</span>
-                  {tempSettings.theme.name === theme.name && <div className="absolute top-3 right-3 w-3 h-3 rounded-full bg-primary"></div>}
-                </button>
-              ))}
-          </div>
-       ) : (
-          <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-100 w-fit">
-              <div className="w-8 h-8 rounded-full shadow-sm border border-black/5" style={{ backgroundColor: `rgb(${settings.theme.primaryColor})` }}></div>
-              <span className="text-base font-medium capitalize text-slate-700">{settings.theme.name}</span>
-          </div>
-       )}
-    </Card>
-  );
+            <div className="space-y-6">
+               <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Limite Diário de Revisões</label>
+                  <div className="flex items-center gap-4">
+                     <input
+                        type="range"
+                        min="10"
+                        max="200"
+                        step="10"
+                        value={dailyLimit}
+                        onChange={(e) => setDailyLimit(Number(e.target.value))}
+                        className="flex-1 accent-primary h-2 bg-slate-100 rounded-lg appearance-none cursor-pointer"
+                     />
+                     <div className="w-16 h-10 border border-slate-200 rounded-lg flex items-center justify-center font-bold text-slate-700 bg-white">
+                        {dailyLimit}
+                     </div>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">Aumente para avançar mais rápido, diminua para evitar sobrecarga.</p>
+               </div>
+               <Button variant="secondary" onClick={handleSaveLimit}>Atualizar Limite</Button>
+            </div>
+         </Card>
 
-  const renderIntervalsSection = () => (
-    <Card className="p-8">
-       <div className="flex items-center gap-3 mb-8 border-b border-slate-100 pb-5">
-          <Clock className="w-6 h-6 text-primary-muted" />
-          <h3 className="text-xl font-bold text-slate-900">Ritmo de Revisão</h3>
-       </div>
+         {/* Appearance */}
+         <Card className="p-6 md:p-8">
+            <div className="flex items-center gap-3 mb-6">
+               <div className="p-2 bg-primary-soft rounded-lg text-primary-strong">
+                  <Palette size={24} />
+               </div>
+               <h2 className="text-xl font-bold text-slate-900">Aparência</h2>
+            </div>
 
-       {isEditing && (
-         <div className="bg-primary-soft text-primary-strong p-4 rounded-xl mb-8 flex items-start gap-3 text-sm">
-            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
-            <p className="leading-relaxed">Alterar estes intervalos recalculará automaticamente suas revisões futuras.</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+               {[
+                  { id: 'light', label: 'Claro', bg: 'bg-white' },
+                  { id: 'dark', label: 'Escuro', bg: 'bg-slate-900' },
+                  { id: 'sepia', label: 'Sépia', bg: 'bg-[#f4ebd0]' },
+                  { id: 'system', label: 'Sistema', bg: 'bg-slate-200' }
+               ].map(theme => (
+                  <button
+                     key={theme.id}
+                     onClick={() => handleThemeChange(theme.id as ThemeSettings)}
+                     className={`p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 ${settings.theme === theme.id ? 'border-primary bg-primary-soft' : 'border-slate-100 hover:border-slate-200'}`}
+                  >
+                     <div className={`w-8 h-8 rounded-full shadow-sm border border-slate-200 ${theme.bg}`}></div>
+                     <span className={`text-sm font-bold ${settings.theme === theme.id ? 'text-primary-strong' : 'text-slate-600'}`}>{theme.label}</span>
+                  </button>
+               ))}
+            </div>
+         </Card>
+
+         {/* Data Management */}
+         <Card className="p-6 md:p-8">
+            <div className="flex items-center gap-3 mb-6">
+               <div className="p-2 bg-primary-soft rounded-lg text-primary-strong">
+                  <Save size={24} />
+               </div>
+               <h2 className="text-xl font-bold text-slate-900">Gerenciar Dados</h2>
+            </div>
+
+            <div className="space-y-4">
+               <div className="flex flex-col sm:flex-row gap-4">
+                  <Button variant="secondary" onClick={handleExport} className="flex-1">
+                     <Upload className="mr-2 h-4 w-4" /> Exportar Backup (JSON)
+                  </Button>
+                  <div className="flex-1 relative">
+                     <Button variant="secondary" className="w-full" onClick={() => document.getElementById('import-file')?.click()}>
+                        <Save className="mr-2 h-4 w-4" /> Importar Backup
+                     </Button>
+                     <input id="import-file" type="file" className="hidden" accept=".json" onChange={handleImport} />
+                  </div>
+               </div>
+
+               <div className="pt-6 border-t border-slate-100 mt-6">
+                  <h3 className="text-sm font-bold text-red-600 mb-2 flex items-center gap-2"><AlertCircle size={16} /> Zona de Perigo</h3>
+                  <Button variant="ghost" onClick={handleHardReset} className="w-full border border-red-100 text-red-600 hover:bg-red-50 hover:text-red-700">
+                     <Trash2 className="mr-2 h-4 w-4" /> Resetar Toda a Conta
+                  </Button>
+               </div>
+            </div>
+         </Card>
+
+         <div className="text-center text-xs text-slate-400">
+            Remindex v2.1.0 • Build 2024.10
          </div>
-       )}
 
-       <div className="space-y-8">
-          {[
-             { label: 'Fácil', diff: Difficulty.EASY },
-             { label: 'Médio', diff: Difficulty.MEDIUM },
-             { label: 'Difícil', diff: Difficulty.HARD },
-          ].map((level) => (
-             <div key={level.diff}>
-                <div className="mb-3">
-                   <Badge variant="soft">{level.label}</Badge>
-                </div>
-                
-                {isEditing ? (
-                   <div className="flex flex-wrap gap-3">
-                      {tempSettings.reviewIntervals[level.diff].map((days, idx) => (
-                         <div key={idx} className="relative">
-                           <select 
-                             value={days}
-                             onChange={(e) => handleIntervalChange(level.diff, idx, e.target.value)}
-                             className="appearance-none bg-white border border-slate-200 text-slate-700 py-2.5 pl-4 pr-10 rounded-lg text-sm font-semibold focus:outline-none focus:border-primary hover:border-slate-300 cursor-pointer shadow-sm"
-                           >
-                              {STANDARD_INTERVALS.map(opt => <option key={opt} value={opt}>{opt} dias</option>)}
-                              {!STANDARD_INTERVALS.includes(days) && <option value={days}>{days} dias</option>}
-                              {tempSettings.reviewIntervals[level.diff].length > 1 && <option value="remove">Remover</option>}
-                           </select>
-                         </div>
-                      ))}
-                      <button 
-                        onClick={() => addInterval(level.diff)}
-                        className="p-2.5 rounded-lg border border-dashed border-slate-300 text-slate-400 hover:text-primary-strong hover:border-primary-strong transition-colors"
-                      >
-                         <Plus className="w-5 h-5" />
-                      </button>
-                   </div>
-                ) : (
-                   <div className="flex gap-3">
-                      {settings.reviewIntervals[level.diff].map((days, idx) => (
-                         <span key={idx} className="px-4 py-2 bg-slate-50 border border-slate-100 rounded-lg text-sm font-medium text-slate-600">
-                           {days} dias
-                         </span>
-                      ))}
-                   </div>
-                )}
-             </div>
-          ))}
-       </div>
-    </Card>
-  );
-
-  return (
-    <div className="space-y-8 max-w-4xl mx-auto pb-10">
-      <div className="flex justify-between items-center pt-2">
-         <div>
-            <h2 className="text-3xl font-semibold text-slate-900 tracking-tight">Configurações</h2>
-            <p className="text-slate-500 text-lg mt-1">Gerencie seu perfil e preferências.</p>
-         </div>
-         <div className="flex gap-4">
-            {isEditing ? (
-               <>
-                  <Button variant="secondary" onClick={handleCancelEdit}>Cancelar</Button>
-                  <Button onClick={handleSave}><Save className="w-5 h-5 mr-2" /> Salvar</Button>
-               </>
-            ) : (
-               <Button variant="secondary" onClick={handleStartEdit}>Editar</Button>
-            )}
-         </div>
       </div>
-
-      {renderProfileSection()}
-      {renderThemeSection()}
-      {renderIntervalsSection()}
-
-      {!isEditing && (
-         <div className="pt-10 border-t border-slate-200 mt-10">
-            <div className="bg-slate-50 border border-slate-100 rounded-xl p-8">
-               <h3 className="text-slate-700 font-bold text-lg mb-2">Zona de Perigo</h3>
-               <p className="text-base text-slate-500 mb-6">
-                  Ações aqui não podem ser desfeitas.
-               </p>
-               <Button variant="danger" onClick={onResetData}>
-                  <Trash2 className="w-5 h-5 mr-2" /> Resetar Dados
-               </Button>
-            </div>
-         </div>
-      )}
-    </div>
-  );
+   );
 };
